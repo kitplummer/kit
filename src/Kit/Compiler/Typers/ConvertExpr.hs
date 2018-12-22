@@ -135,6 +135,12 @@ convertExpr ctx tctx mod params e = do
           return (name, r1)
         )
       return $ m (StructInit t fields) t
+    UnionInit t (name, e) -> do
+      t     <- typeOrTypeVar t
+      field <- do
+        r1 <- r e
+        return (name, r1)
+      return $ m (UnionInit t field) t
     -- EnumInit b Str [a]
     ArrayAccess e1 e2 -> container2 e1 e2 ArrayAccess
     Call e1 imp args  -> do
@@ -184,6 +190,9 @@ convertExpr ctx tctx mod params e = do
       return $ m (Implicit t') t'
     Null -> do
       return $ m Null $ TypePtr TypeVoid
+    Undefined -> do
+      t <- mtv
+      return $ m Undefined t
     Empty -> do
       t <- mtv
       return $ m Empty t
