@@ -38,6 +38,7 @@ script:
 - stack build kitlang:kitc
 - stack exec kitc -- -h
 - TEST_RUNS=1 stack test --test-arguments '+RTS -N -RTS'
+- "fpm --version"
 
 notifications:
   webhooks:
