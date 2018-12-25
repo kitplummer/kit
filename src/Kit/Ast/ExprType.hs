@@ -64,6 +64,7 @@ data ExprType a b
   | InlineCall a
   | Field a (Identifier b)
   | StructInit b [(Str, a)]
+  | UnionInit b (Str, a)
   | EnumInit b TypePath [(Str, a)]
   | EnumField a Str Str
   | TupleInit [a]
@@ -89,6 +90,7 @@ data ExprType a b
   | Temp a
   | Null
   | Empty
+  | Undefined
   | InlineCExpr Str b
   | VarArg Str
   | StaticExpr a
@@ -149,6 +151,8 @@ exprDiscriminant et = case et of
   StaticExpr _                -> 46
   Yield      _                -> 47
   Tokens     _                -> 48
+  Undefined                   -> 49
+  UnionInit _ _               -> 50
   x -> throwk $ InternalError "Expression has no discriminant!" Nothing
 
 exprChildren :: ExprType a b -> [a]
@@ -168,6 +172,7 @@ exprChildren et = case et of
   InlineCall x          -> [x]
   Field      x _        -> [x]
   StructInit _ fields   -> map snd fields
+  UnionInit  _ field    -> [snd field]
   EnumInit  _ _ x       -> map snd x
   EnumField x _ _       -> [x]
   ArrayAccess x y       -> [x, y]

@@ -70,6 +70,13 @@ typeStructInit (TyperUtils { _r = r, _tryRewrite = tryRewrite, _resolve = resolv
                         value <- typeExpr ctx tctx mod value
                         return $ Just ((name, value), fieldType)
                       Nothing -> case varDefault field of
+                        Just (TypedExpr { tExpr = Undefined }) ->
+                          throwk $ TypingError
+                            ("Struct field `"
+                            ++ s_unpack (showTypePath $ varName field)
+                            ++ "` defaults to `undefined`, so a value must be provided when initializing"
+                            )
+                            pos
                         Just fieldDefault -> do
                           fieldDefault <- typeExpr ctx tctx mod fieldDefault
                           return
@@ -77,16 +84,7 @@ typeStructInit (TyperUtils { _r = r, _tryRewrite = tryRewrite, _resolve = resolv
                                 ( (tpName $ varName field, fieldDefault)
                                 , fieldType
                                 )
-                        Nothing -> case tctxState tctx of
-                          TypingPattern -> return Nothing
-                          _             -> throwk $ TypingError
-                            (  "Struct "
-                            ++ s_unpack (showTypePath tp)
-                            ++ " is missing field "
-                            ++ s_unpack (showTypePath $ varName field)
-                            ++ ", and no default value is provided."
-                            )
-                            pos
+                        Nothing -> return Nothing
                   )
                 typedFields <- forMWithErrors
                   (catMaybes typedFields)
@@ -100,7 +98,7 @@ typeStructInit (TyperUtils { _r = r, _tryRewrite = tryRewrite, _resolve = resolv
                       (tPos r1)
                     return (name, converted)
                   )
-                structType <- mapType (follow ctx tctx) $ TypeInstance tp params
+                structType <- mapType (follow ctx tctx) $ structType
                 return $ (makeExprTyped (StructInit structType typedFields)
                                         structType
                                         pos
@@ -115,3 +113,35 @@ typeStructInit (TyperUtils { _r = r, _tryRewrite = tryRewrite, _resolve = resolv
 
       result <- findStruct structType tctx
       return $ result { inferredType = structType }
+
+    (UnionInit unionType@(TypeInstance tp p) (name, expr)) -> do
+      let
+        findUnion (TypeInstance tp p) tctx = do
+          params <- makeGeneric ctx tp pos p
+          tctx <- genericTctx ctx tctx pos (TypeInstance tp $ map snd params)
+          params <- forMWithErrors (map snd params) $ mapType $ follow ctx tctx
+          unionDef <- getTypeDefinition ctx tp
+          case typeSubtype unionDef of
+            Abstract { abstractUnderlyingType = parent@(TypeInstance tp p) } ->
+              do
+                parent <- mapType (follow ctx tctx) parent
+                findUnion parent tctx
+
+            StructUnion { structUnionFields = structUnionFields, isStruct = False }
+              -> do
+                expr      <- typeExpr ctx tctx mod expr
+                unionType <- mapType (follow ctx tctx) $ unionType
+                return $ (makeExprTyped (UnionInit unionType (name, expr))
+                                        unionType
+                                        pos
+                         )
+                  { tIsLvalue = True
+                  , tIsLocal  = True
+                  }
+
+            x -> throwk $ TypingError
+              ("Type " ++ s_unpack (showTypePath tp) ++ " isn't a union")
+              pos
+
+      result <- findUnion unionType tctx
+      return $ result { inferredType = unionType }
