@@ -1,9 +1,9 @@
-module Kit.Compiler.Ir.ExprToIr where
+module Kit.Compiler.Ir.ExprToIr (typedToIr, newIrContext) where
 
 import Control.Exception
 import Control.Monad
 import Data.Function
-import Data.IORef
+import Data.Mutable
 import Data.List
 import Data.Maybe
 import Kit.Ast
@@ -38,7 +38,7 @@ newIrContext :: IO IrContext
 newIrContext = do
   d          <- h_new
   tempInfo   <- h_new
-  nextTempId <- newIORef 1
+  nextTempId <- newRef 1
   return $ IrContext
     { ictxTemps           = d
     , ictxTempInfo        = tempInfo
@@ -49,8 +49,8 @@ newIrContext = do
 
 makeIrTempVar :: IrContext -> IO Int
 makeIrTempVar ictx = do
-  next <- readIORef $ ictxNextTempId ictx
-  modifyIORef (ictxNextTempId ictx) ((+) 1)
+  next <- readRef $ ictxNextTempId ictx
+  modifyRef (ictxNextTempId ictx) ((+) 1)
   return next
 
 irTempName :: Int -> Str
@@ -82,7 +82,7 @@ typedToIr ctx ictx mod e@(TypedExpr { tExpr = et, tPos = pos, inferredType = t }
         ictx     <- newIrContext
         children <- forMWithErrors (zip [0 ..] children)
           $ \(n, child) -> typedToIr ctx (ictx { ictxChildNo = n }) mod child
-        lastId    <- readIORef (ictxNextTempId ictx)
+        lastId    <- readRef (ictxNextTempId ictx)
         tempDecls <- forM [1 .. lastId - 1] $ \i -> do
           temp@(IrTempInfo { irTempType = tempType, irTempExpr = tempDefault, irTempOrder = tempOrder }) <-
             h_get (ictxTempInfo ictx) i
@@ -151,19 +151,19 @@ typedToIr ctx ictx mod e@(TypedExpr { tExpr = et, tPos = pos, inferredType = t }
         TypeFunction rt args varargs params | not (null params) -> do
           -- generic function
           tctx   <- modTypeContext ctx mod
-          params <- mapMWithErrors (mapType $ follow ctx tctx) params
+          params <- mapMWithErrors (follow ctx tctx) params
           return $ IrIdentifier $ monomorphName v params
         _ -> return $ IrIdentifier v
       (StaticMember tp params name) -> do
         tctx   <- modTypeContext ctx mod
-        params <- forMWithErrors params $ mapType $ follow ctx tctx
+        params <- forMWithErrors params $ follow ctx tctx
         when (or $ map typeUnresolved params) $ throwk $ TypingError
           (  s_unpack (showTypePath tp)
           ++ " parameter values for static member couldn't be resolved: "
           ++ show params
           )
           pos
-        t <- mapType (follow ctx tctx) t
+        t <- follow ctx tctx t
         return $ IrIdentifier $ subPath (monomorphName tp params) $ name
       (Identifier (MacroVar v _)) -> return $ IrIdentifier ([], v)
       (TypeAnnotation e1 t      ) -> throw $ KitError $ BasicError
@@ -391,9 +391,12 @@ typedToIr ctx ictx mod e@(TypedExpr { tExpr = et, tPos = pos, inferredType = t }
             return (name, r1)
           )
         return $ IrStructInit f resolvedFields
+      (UnionInit t (name, e)) -> do
+        resolved <- r e
+        return $ IrUnionInit f (name, resolved)
       (EnumInit (TypeInstance tp p) discriminant args) -> do
         tctx           <- modTypeContext ctx mod
-        resolvedParams <- forM p $ mapType $ follow ctx tctx
+        resolvedParams <- forM p $ follow ctx tctx
         f              <- findUnderlyingType ctx
                                              mod
                                              (Just pos)
@@ -428,7 +431,7 @@ typedToIr ctx ictx mod e@(TypedExpr { tExpr = et, tPos = pos, inferredType = t }
           r1     <- r e1
           for    <- findUnderlyingType ctx mod (Just pos) $ implFor i
           tctx   <- modTypeContext ctx mod
-          params <- forMWithErrors params $ mapType (follow ctx tctx)
+          params <- forMWithErrors params $ follow ctx tctx
           let structName =
                 subPath (monomorphName (modPath, traitName) params) "box"
           return $ IrStructInit
@@ -463,16 +466,18 @@ typedToIr ctx ictx mod e@(TypedExpr { tExpr = et, tPos = pos, inferredType = t }
         return $ IrSizeOf t
       (Null ) -> return IrNull
       (Empty) -> do
-        t' <- findUnderlyingType ctx mod (Just pos) t
-        case t' of
+        t <- findUnderlyingType ctx mod (Just pos) t
+        case t of
           CArray              _ _ -> return ()
           BasicTypeAnonStruct _ _ -> return ()
           BasicTypeStruct      _  -> return ()
           BasicTypeComplexEnum _  -> return ()
           _                       -> throwk $ TypingError
-            ("`empty` isn't a valid value of type " ++ show t')
+            ("`empty` isn't a valid value of type " ++ show t)
             pos
-        return $ IrEmpty t'
+        return $ IrEmpty t
+      (Undefined) ->
+        throwk $ TypingError "`undefined` isn't a valid runtime value" pos
       (VarArg x) -> do
         return $ IrCall (IrIdentifier ([], "va_arg"))
                         [IrIdentifier ([], x), IrType f]

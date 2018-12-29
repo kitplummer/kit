@@ -1,4 +1,10 @@
-module Kit.Compiler.Typers.AutoRefDeref where
+module Kit.Compiler.Typers.AutoRefDeref (
+  autoRefDeref,
+  tryAutoRefDeref,
+  makeLvalue,
+  addRef,
+  addDeref
+) where
 
 import Control.Monad
 import Data.List
@@ -47,12 +53,14 @@ _autoRefDeref ctx tctx (MethodTarget a) (MethodTarget b) ex = do
     Nothing -> Nothing
 _autoRefDeref ctx tctx toType fromType ex = do
   let r = _autoRefDeref ctx tctx
-  toType   <- mapType (follow ctx tctx) toType
-  fromType <- mapType (follow ctx tctx) fromType
+  toType   <- follow ctx tctx toType
+  fromType <- follow ctx tctx fromType
   result   <- unifyStrict ctx tctx toType fromType
   case result of
     Just _ -> return $ Just ex
     _      -> case (toType, fromType) of
+      (TypePtr f1@(TypeFunction _ _ _ _), f2@(TypeFunction _ _ _ _)) ->
+        r f1 f2 ex
       (MethodTarget a   , _             ) -> return Nothing
       (_                , MethodTarget b) -> return Nothing
       (TypeBox tp params, b             ) -> do
@@ -114,14 +122,16 @@ makeBox
   -> TypedExpr
   -> IO (Maybe TypedExpr)
 makeBox ctx tctx tp params ex = do
-  let ref = addRef ex
+  let (t, ref) = case inferredType ex of
+        TypePtr t -> (t, ex)
+        t         -> (t, addRef ex)
   traitDef <- getTraitDefinition ctx tp
-  impl     <- getTraitImpl ctx tctx (tp, params) (inferredType ex)
+  impl     <- getTraitImpl ctx tctx (tp, params) t
   case impl of
     Just impl -> do
       params <- makeGeneric ctx tp (tPos ex) params
       useImpl ctx tctx (tPos ex) traitDef impl (map snd params)
-      t' <- mapType (follow ctx tctx) $ TypeBox tp $ map snd $ params
+      t' <- follow ctx tctx $ TypeBox tp $ map snd $ params
       return $ Just $ ex
         { tExpr        = Box
           (impl { implTrait = TypeTraitConstraint (tp, map snd params) })

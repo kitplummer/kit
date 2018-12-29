@@ -232,16 +232,17 @@ typeExpr ctx tctx mod ex@(TypedExpr { tExpr = et, tPos = pos }) = do
 
     (LocalVarDeclaration _ _ _ _) -> subTyper typeVarDeclaration
 
-    (StructInit _ _        ) -> subTyper typeStructInit
+    (StructInit _ _             ) -> subTyper typeStructInit
+    (UnionInit  _ _             ) -> subTyper typeStructInit
 
-    (TupleInit slots       ) -> do
+    (TupleInit slots            ) -> do
       slots' <- forMWithErrors slots r
       return $ makeExprTyped (TupleInit slots')
                              (TypeTuple (map inferredType slots'))
                              pos
 
     (Implicit t) -> do
-      t   <- mapType (follow ctx tctx) t
+      t   <- follow ctx tctx t
       val <- findImplicit ctx tctx t (tctxImplicits tctx)
       case val of
         Just (_, x) -> return x
@@ -263,7 +264,7 @@ typeExpr ctx tctx mod ex@(TypedExpr { tExpr = et, tPos = pos }) = do
                                                                      }
 
     (SizeOf t) -> do
-      t <- mapType (follow ctx tctx) $ t
+      t <- follow ctx tctx $ t
       return $ makeExprTyped (SizeOf t) (inferredType ex) pos
 
     (StaticExpr x@(TypedExpr { tExpr = If cond then_ else_ })) -> do
@@ -295,7 +296,7 @@ typeExpr ctx tctx mod ex@(TypedExpr { tExpr = et, tPos = pos }) = do
 
     _ -> return $ ex
 
-  t'       <- mapType (follow ctx tctx) $ inferredType result
+  t'       <- follow ctx tctx $ inferredType result
   result   <- return $ result { inferredType = t' }
   ownRules <- ownRules ctx tctx result
   result   <- return $ result { tImplicitRules = ownRules }
@@ -311,7 +312,7 @@ ownRules ctx tctx this = case inferredType this of
     case typeSubtype def of
       Abstract { abstractUnderlyingType = parent@(TypeInstance tp params) } ->
         do
-          parent      <- mapType (follow ctx tctx) parent
+          parent      <- follow ctx tctx parent
           parentRules <- ownRules ctx tctx $ this { inferredType = parent }
           return
             $  rules

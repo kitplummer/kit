@@ -51,7 +51,7 @@ getAbstractParents ctx tctx t = do
             | (param, value) <- zip (typeParams def) params
             ]
             (typePos def)
-          t       <- mapType (follow ctx tctx) t'
+          t       <- follow ctx tctx t'
           parents <- getAbstractParents ctx tctx t
           return $ t : parents
         _ -> return []
@@ -83,8 +83,8 @@ unifyBase ctx tctx strict a' b'         = do
         )
         (Just [])
         x
-  a <- mapType (follow ctx tctx) a'
-  b <- mapType (follow ctx tctx) b'
+  a <- follow ctx tctx a'
+  b <- follow ctx tctx b'
   case (a, b) of
     (MethodTarget a, MethodTarget b) -> r a b
     -- FIXME: this shouldn't be necessary, but MethodTarget sometimes bleeds through type inference
@@ -128,10 +128,16 @@ unifyBase ctx tctx strict a' b'         = do
     (TypeTraitConstraint t, x) -> do
       impl <- resolveTraitConstraint ctx tctx t x
       if impl then return $ Just [] else fallBackToAbstractParent a b
-    (_, TypeTraitConstraint v                ) -> r b a
-    (TypeBasicType a, TypeBasicType b        ) -> return $ unifyBasic a b
-    (TypePtr       (TypeBasicType BasicTypeVoid), TypePtr _) -> return $ Just []
-    (TypePtr       _, TypePtr (TypeBasicType BasicTypeVoid)) -> return $ Just []
+    (_              , TypeTraitConstraint v) -> r b a
+    (TypeBasicType a, TypeBasicType b      ) -> return $ unifyBasic a b
+    (TypePtr (TypeBasicType BasicTypeVoid), TypePtr _) ->
+      return $ if strict then Nothing else Just []
+    (TypePtr _, TypePtr (TypeBasicType BasicTypeVoid)) ->
+      return $ if strict then Nothing else Just []
+    (TypePtr (TypeConst x), TypePtr (TypeConst y)) ->
+      if strict then return Nothing else r (TypePtr x) (TypePtr y)
+    (TypePtr (TypeConst x), TypePtr y) ->
+      if strict then return Nothing else r (TypePtr x) (TypePtr y)
     (TypePtr (TypeBasicType BasicTypeVoid), TypeFunction _ _ _ _) ->
       return $ Just []
     (TypeFunction _ _ _ _, TypePtr (TypeBasicType BasicTypeVoid)) ->
@@ -144,6 +150,7 @@ unifyBase ctx tctx strict a' b'         = do
       rt   <- r rt1 rt2
       args <- forM (zip args1 args2) (\((_, a), (_, b)) -> r a b)
       return $ checkResults $ rt : args
+    (TypePtr f1@(TypeFunction _ _ _ _), f2@(TypeFunction _ _ _ _)) -> r f1 f2
     (TypeEnumConstructor tp1 d1 _ params1, TypeEnumConstructor tp2 d2 _ params2)
       -> if (tp1 == tp2) && (d1 == d2) && (length params1 == length params2)
         then do
@@ -161,6 +168,7 @@ unifyBase ctx tctx strict a' b'         = do
     (TypeArray t1 _, TypePtr t2) -> r t1 t2
     (a, b) | (typeIsIntegral a) && (typeIsIntegral b) -> return $ Just []
     (TypeFloat _, b) | typeIsIntegral b -> return $ Just []
+    (TypeFloat _, TypeFloat _) -> return $ Just []
     (TypeInstance tp1 params1, TypeInstance tp2 params2) ->
       if (tp1 == tp2) && (length params1 == length params2)
         then do
@@ -272,7 +280,7 @@ resolveConstraintOrThrow ctx tctx t@(TypeEq a' b' reason pos) = do
 resolveTraitConstraint
   :: CompileContext -> TypeContext -> TraitConstraint -> ConcreteType -> IO Bool
 resolveTraitConstraint ctx tctx (tp, params) ct = do
-  params <- forM params $ mapType $ follow ctx tctx
+  params <- forM params $ follow ctx tctx
   impl   <- getTraitImpl ctx tctx (tp, params) ct
   return $ impl /= Nothing
 

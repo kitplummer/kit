@@ -1,4 +1,4 @@
-module Kit.Compiler.Typers.TypeExpression.TypeCast where
+module Kit.Compiler.Typers.TypeExpression.TypeCast (typeCast) where
 
 import Control.Exception
 import Control.Monad
@@ -24,7 +24,7 @@ typeCast :: SubTyper
 typeCast (TyperUtils { _r = r, _tryRewrite = tryRewrite, _resolve = resolve, _typeExpr = typeExpr }) ctx tctx mod ex@(TypedExpr { tExpr = et, tPos = pos })
   = case et of
     (Cast e1 t) -> do
-      t  <- mapType (follow ctx tctx) t
+      t  <- follow ctx tctx t
       t  <- makeGenericConcrete ctx pos t
       r1 <- r e1
       tryRewrite (makeExprTyped (Cast r1 t) t pos) $ do
@@ -56,8 +56,11 @@ typeCast (TyperUtils { _r = r, _tryRewrite = tryRewrite, _resolve = resolve, _ty
                   ++ "; no matching trait implementation found"
                   )
                   pos
-            (TypeAnonEnum _                     _, TypeInt _) -> cast
-            (x@(          TypeInstance tp params), y        ) -> do
+            (TypeAnonEnum _                     _, TypeInt _ ) -> cast
+            (TypeAnonEnum _                     _, TypeUint _) -> cast
+            (TypeAnonEnum _                     _, TypeSize  ) -> cast
+            (TypeAnonEnum _                     _, TypeChar  ) -> cast
+            (x@(          TypeInstance tp params), y         ) -> do
               t' <- unify ctx tctx x y
               case t' of
                 Just x -> cast

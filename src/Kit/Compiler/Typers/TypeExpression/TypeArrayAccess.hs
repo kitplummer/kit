@@ -1,4 +1,4 @@
-module Kit.Compiler.Typers.TypeExpression.TypeArrayAccess where
+module Kit.Compiler.Typers.TypeExpression.TypeArrayAccess (typeArrayAccess) where
 
 import Control.Exception
 import Control.Monad
@@ -96,7 +96,8 @@ typeArrayAccess (TyperUtils { _r = r, _tryRewrite = tryRewrite, _resolve = resol
                   "Array access on a pointer requires an Integral argument"
                   (tPos r2)
                 )
-              return $ makeExprTyped (ArrayAccess r1 r2) (inferredType ex) pos
+              return $ (makeExprTyped (ArrayAccess r1 r2) (inferredType ex) pos) { tIsLvalue = True
+                                                                                 }
 
             (TypeInstance tp params, _) -> do
               def <- getTypeDefinition ctx tp
